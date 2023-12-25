@@ -167,7 +167,7 @@ class MyStreamer(BaseStreamer):
             self.token_cache = []
             self.print_pos = 0
 
-def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temperature=0.5, streaming=False):
+def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temperature=0.5, repetition_penalty=1.0, streaming=False):
     tokenizer_kwargs = {"add_special_tokens": False}
     tokens = tokenizer(prompt, return_tensors='pt', **tokenizer_kwargs)
     do_sample = True if temperature > 0 else False
@@ -186,7 +186,8 @@ def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temper
         sep_token_id=tokenizer.sep_token_id,
         temperature=temperature,
         do_sample=do_sample,
-        streamer=streamer
+        streamer=streamer,
+        repetition_penalty=repetition_penalty,
     )
     answer_string = tokenizer.batch_decode(answer_tokens, skip_special_tokens=True)
     answer = answer_string[0]
@@ -199,5 +200,5 @@ while True:
     print('Question: ', end='', flush=True)
     question = input()
     prompt = generate_rag_prompt(question, vectorstore)
-    answer = run_llm_text_generation(model, prompt, tokenizer, streaming=True)
+    answer = run_llm_text_generation(model, prompt, tokenizer, streaming=True, temperature=0, repetition_penalty=1.0)
     print()
