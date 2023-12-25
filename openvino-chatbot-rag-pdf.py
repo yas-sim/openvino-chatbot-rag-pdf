@@ -3,15 +3,14 @@ import time
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from transformers import AutoModel, AutoTokenizer, pipeline
+from transformers import AutoModel, AutoTokenizer
+from transformers.generation.streamers import BaseStreamer, TextStreamer
 
 from langchain_core.documents.base import Document
 from langchain.document_loaders    import PyPDFLoader
 from langchain.embeddings          import HuggingFaceEmbeddings
 from langchain.text_splitter       import CharacterTextSplitter
 from langchain.vectorstores        import Chroma
-from langchain.llms                import HuggingFacePipeline
-from langchain.chains              import RetrievalQA
 
 from optimum.intel.openvino import OVModelForCausalLM
 
@@ -68,6 +67,8 @@ def generate_vectorstore_from_documents(
     for doc in tqdm(splitted_docs):
         vectorstore.add_documents([doc])
 
+    del vectorstore
+    del embeddings
 
 
 if not os.path.exists(env_vectorstore_path):
@@ -107,24 +108,96 @@ retriever = vectorstore.as_retriever()
 #    search_type= 'mmr'
 #)
 
+from langchain.prompts import ChatPromptTemplate
+template = """Answer the question based only on the following context:
+{context}
+
+Question: {question}
+"""
+prompt = ChatPromptTemplate.from_template(template)
+
 model_id = f'{env_model_vendor}/{env_model_name}'
-tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=env_cache_dir)
 ov_model_path = f'./{env_model_name}/{env_model_precision}'
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, cache_dir=env_cache_dir)
 model = OVModelForCausalLM.from_pretrained(model_id=ov_model_path, device=env_inference_device, ov_config=ov_config, cache_dir=env_cache_dir)
-pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=env_num_max_tokens)
-llm = HuggingFacePipeline(pipeline=pipe)
-qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type=env_rag_chain_type, retriever=retriever)
-#qa_chain.run('warm up')
+
+def generate_rag_prompt(question, vectorstore):
+    reference_documents = vectorstore.similarity_search(question, k=4)
+    prompt = 'Answer the question based only on the following context:\n'
+    for ref_doc in reference_documents:
+        prompt += ref_doc.page_content.replace('\n', '')
+    prompt += f'\n\nQuestion: {question}'
+    return prompt
+
+# This class is almost identical to TextStreamer class
+class MyStreamer(BaseStreamer):
+    def __init__(self, tokenizer, **decode_kwargs):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.token_cache = []
+        self.string = ''
+        self.decode_kwargs = decode_kwargs
+        self.print_pos = 0
+    
+    def put(self, value):
+        if len(value.shape)>1: # Ignore the input prompt message
+            return
+        value = value.tolist()
+        self.token_cache.extend(value)
+        text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
+        if text.endswith('\n'):
+            print_text = text[self.print_pos: ]
+            print(print_text.rstrip('\n'))
+            self.token_cache= []
+            self.print_pos = 0
+        else:
+            print_text = text[self.print_pos: text.rfind(' ')+1]
+            self.print_pos += len(print_text)
+            print(print_text, end='', flush=True)
+
+    def end(self):
+        if len(self.token_cache) > 0:
+            text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
+            print_text = text[self.print_pos: ]
+            print(print_text)
+            self.token_cache = []
+            self.print_pos = 0
+        else:
+            print()
+            self.token_cache = []
+            self.print_pos = 0
+
+def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temperature=0.5, streaming=False):
+    tokenizer_kwargs = {"add_special_tokens": False}
+    tokens = tokenizer(prompt, return_tensors='pt', **tokenizer_kwargs)
+    do_sample = True if temperature > 0 else False
+    if streaming:
+        #streamer = TextStreamer(tokenizer, skip_prompt=True, **tokenizer_kwargs)
+        streamer = MyStreamer(tokenizer, **tokenizer_kwargs)
+    else:
+        streamer = None
+
+    answer_tokens = model.generate(
+        input_ids=tokens.input_ids,
+        attention_mask=tokens.attention_mask,
+        max_new_tokens=max_new_tokens,
+        #pad_token_id=tokenizer.pad_token_id,
+        pad_token_id=tokenizer.eos_token_id,
+        sep_token_id=tokenizer.sep_token_id,
+        temperature=temperature,
+        do_sample=do_sample,
+        streamer=streamer
+    )
+    answer_string = tokenizer.batch_decode(answer_tokens, skip_special_tokens=True)
+    answer = answer_string[0]
+    if '\n\nAnswer: ' in answer:
+        answer = answer.split('\n\nAnswer: ')[1]
+    return answer
+
 
 while True:
-    print('\n\n', '-' * 60)
-    print(f'\nQuestion: ', end='', flush=True)
+    print('Question: ', end='', flush=True)
     question = input()
-    if question == '':
-        break
-    stime = time.time()
-    ans = qa_chain.run(question)
-    etime = time.time()
-
-    print(f'Answer: {ans}')
-    print(f'{etime-stime:6.2f} sec')
+    prompt = generate_rag_prompt(question, vectorstore)
+    answer = run_llm_text_generation(model, prompt, tokenizer, streaming=True)
+    print()
