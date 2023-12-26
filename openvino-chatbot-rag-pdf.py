@@ -200,5 +200,5 @@ while True:
     print('Question: ', end='', flush=True)
     question = input()
     prompt = generate_rag_prompt(question, vectorstore)
-    answer = run_llm_text_generation(model, prompt, tokenizer, streaming=True, temperature=0, repetition_penalty=1.0)
+    answer = run_llm_text_generation(model, prompt, tokenizer, streaming=True, temperature=0.1, repetition_penalty=1.2)
     print()
