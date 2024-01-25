@@ -44,7 +44,7 @@ python openvino-chatbot-rag-pdf.py -v vectorstore_input
 ```
 ![chatbot](./resources/chatbot.png)
 
-## Appendix - vectorstore test tool
+## Appendix - vectorstore (retriever) test tool
 You can check which fraction of the input documents are picked up from the vectorstore based on the input query.
 ```sh
 python test_vectorstore.py -v vectorstore_hoge
