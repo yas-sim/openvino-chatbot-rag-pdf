@@ -71,13 +71,16 @@ def main():
     print('*** LLM model downloader')
 
     # Databricks/dolly-v2-3b
-    #prepare_model('databricks', 'dolly-v2-3b', group_size=128, ratio=0.8)
+    prepare_model('databricks', 'dolly-v2-3b', group_size=128, ratio=0.8)
 
     # Intel/neural-chat-7b
-    #prepare_model('Intel', 'neural-chat-7b-v3-1', group_size=64, ratio=0.6)
+    prepare_model('Intel', 'neural-chat-7b-v3-1', group_size=64, ratio=0.6)
 
     # TinyLlama/TinyLlama-1.1B-Chat-v0.6
     prepare_model('TinyLlama', 'TinyLlama-1.1B-Chat-v0.6', group_size=64, ratio=0.6)
+
+    # rinna/youri-7b-instruction , youri-7b-chat
+    prepare_model('rinna', 'youri-7b-chat', group_size=128, ratio=0.8)
 
     """
     # meta/Llama2-7b-chat
