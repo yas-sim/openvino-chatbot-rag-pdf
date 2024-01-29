@@ -29,7 +29,7 @@ logger = logging.getLogger('Logger')
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(env_log_level)
 
-def generate_rag_prompt(question, vectorstore, bos_token='<s>'):
+def generate_rag_prompt(question, vectorstore, bos_token='<s>', verbose=False):
     B_INST, E_INST = '[INST]', '[/INST]'
     B_SYS, E_SYS = '<<SYS>>\n', '\n<</SYS>>\n\n'
     reference_documents = vectorstore.similarity_search(question, k=4)
@@ -37,25 +37,31 @@ def generate_rag_prompt(question, vectorstore, bos_token='<s>'):
     prompt += 'Answer the question based only on the following context:\n'
     for ref_doc in reference_documents:
         prompt += ref_doc.page_content.replace('\n', '') + '\n'
+        prompt += '\n'
     prompt += f'{E_SYS}'
     prompt += f'Question: {question} {E_INST}'
     logger.debug(prompt)
+    if verbose:
+        print(prompt)
     return prompt
 
-def generate_rag_prompt_jp(question, vectorstore, bos_token='<s>'):
+def generate_rag_prompt_jp(question, vectorstore, bos_token='<s>', verbose=False):
     B_INST, E_INST = '', '\n'
     B_SYS, E_SYS = '設定: ', '\n\n'
     reference_documents = vectorstore.similarity_search(question, k=4)
     prompt  = f'{bos_token}{B_INST} {B_SYS} 以下の参考文章のみを参照して質問に回答しなさい。\n'
     for ref_doc in reference_documents:
         prompt += ref_doc.page_content.replace('\n', ' ')
+        prompt += '\n'
     prompt += f'{E_SYS}'
     prompt += f'ユーザー: {question} {E_INST}'
     prompt += 'システム: '
     logger.debug(prompt)
+    if verbose:
+        print(prompt)
     return prompt
 
-def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temperature=0.5, repetition_penalty=1.0, streaming=False):
+def run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=140, temperature=0.5, repetition_penalty=1.0, streaming=False, verbose=False):
     tokenizer_kwargs = {"add_special_tokens": False}
     tokens = tokenizer(prompt, return_tensors='pt', **tokenizer_kwargs)
     do_sample = True if temperature > 0 else False
@@ -95,6 +101,7 @@ def parse_arguments():
     parser.add_argument('-m', '--max_tokens', default=140, type=int, help='Number of maximum tokens to generate')
     parser.add_argument('-t', '--temperature', default=0.2, type=float, help='Temperature')
     parser.add_argument('-r', '--repetition_penalty', default=1.0, type=float, help='Repetition penalty')
+    parser.add_argument('--verbose', action='store_true', help='Verbose flag')
     args = parser.parse_args()
     return args
 
@@ -127,11 +134,11 @@ def main():
         
         if env_model_name in [ 'youri-7b-chat' ]:
             print(f'Japanese model ({env_model_name})')
-            prompt = generate_rag_prompt_jp(query, vectorstore, tokenizer.bos_token)
+            prompt = generate_rag_prompt_jp(query, vectorstore, tokenizer.bos_token, args.verbose)
         else:
-            prompt = generate_rag_prompt(query, vectorstore, tokenizer.bos_token)
+            prompt = generate_rag_prompt(query, vectorstore, tokenizer.bos_token, args.verbose)
 
-        answer = run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=args.max_tokens, streaming=env_streaming, temperature=args.temperature, repetition_penalty=args.repetition_penalty)
+        answer = run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=args.max_tokens, streaming=env_streaming, temperature=args.temperature, repetition_penalty=args.repetition_penalty, verbose=args.verbose)
         if env_streaming:
             print()
         else:

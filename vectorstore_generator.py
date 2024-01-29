@@ -12,6 +12,11 @@ from langchain.embeddings          import HuggingFaceEmbeddings
 from langchain.text_splitter       import CharacterTextSplitter
 from langchain.vectorstores        import Chroma
 
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LAParams, LTContainer, LTTextBox
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
+from pdfminer.pdfpage import PDFPage
+
 load_dotenv(verbose=True)
 env_model_embeddings = os.environ['MODEL_EMBEDDINGS']
 env_regenerate_vs    = True if os.environ['REGENERATE_VECTORSTORE'] == "True" else False
@@ -23,11 +28,48 @@ logger = logging.getLogger('Logger')
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(env_log_level)
 
-
+"""
+# LangChain PDF reader - 
 def read_pdf(pdf_path:str):
     loader = PyPDFLoader(pdf_path)
     pdf_pages = loader.load_and_split()
     return pdf_pages
+"""
+
+# PDF reader based on PDFminer.six - CJK supported
+def find_text_boxes(layout_obj):
+    if isinstance(layout_obj, LTTextBox):
+        return [layout_obj]
+    if isinstance(layout_obj, LTContainer):
+        boxes = []
+        for child_obj in layout_obj:
+            boxes.extend(find_text_boxes(child_obj))
+        return boxes
+    return []
+
+def get_text_from_a_page(page, interpreter, device):
+        interpreter.process_page(page)
+        layout = device.get_result()
+        boxes = find_text_boxes(layout)
+        boxes.sort(key=lambda coord: (-coord.y1, coord.x0))       # sort by text box position in the page
+        text = ''
+        for box in boxes:
+            text += box.get_text().strip().replace('\ufffd','')   # remove utf-8 REPLACEMENT CHARACTER "�"
+        return text
+
+def read_pdf(file_name):
+    laparams = LAParams(detect_vertical=True)        # enable vertical writing
+    resource_manager = PDFResourceManager()
+    device = PDFPageAggregator(resource_manager, laparams=laparams)
+    interpreter = PDFPageInterpreter(resource_manager, device)
+
+    pages = []
+    with open(file_name, mode='rb') as f:
+        for n, page  in enumerate(PDFPage.get_pages(f)):
+            text = get_text_from_a_page(page, interpreter, device)
+            doc = Document(page_content=text, metadata={'page': n, 'source': file_name})
+            pages.append(doc)
+    return pages
 
 # Split the texts (document) into smaller chunks
 def split_text(pdf_pages, chunk_size=300, chunk_overlap=50, separator=''):
@@ -76,8 +118,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser('vectorstore_generator', 'Generates a vectorstore from a PDF file.')
     parser.add_argument('-i', '--input_document', required=True, default=None, type=str, help='Input PDF file name')
     parser.add_argument('-o', '--output_vectorstore', default=None, type=str, help='Output vectorstore file name')
-    parser.add_argument('-s', '--chunk_size', default=300, type=int, help='Chunk size')
-    parser.add_argument('-v', '--chunk_overlap', default=0, type=int, help='Chunk overlap')
+    parser.add_argument('-s', '--chunk_size', default=150, type=int, help='Chunk size')
+    parser.add_argument('-v', '--chunk_overlap', default=70, type=int, help='Chunk overlap')
     args = parser.parse_args()
     return args
 
