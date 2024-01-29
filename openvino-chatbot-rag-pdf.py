@@ -124,10 +124,14 @@ def main():
                 break
         else:
             query = args.query
-        prompt = generate_rag_prompt(query, vectorstore, tokenizer.bos_token)
+        
+        if env_model_name in [ 'youri-7b-chat' ]:
+            print(f'Japanese model ({env_model_name})')
+            prompt = generate_rag_prompt_jp(query, vectorstore, tokenizer.bos_token)
+        else:
+            prompt = generate_rag_prompt(query, vectorstore, tokenizer.bos_token)
+
         answer = run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=args.max_tokens, streaming=env_streaming, temperature=args.temperature, repetition_penalty=args.repetition_penalty)
-        #prompt = generate_rag_prompt_jp(query, vectorstore, tokenizer.bos_token)
-        #answer = run_llm_text_generation(model, prompt, tokenizer, max_new_tokens=args.max_tokens, streaming=env_streaming, temperature=args.temperature, repetition_penalty=args.repetition_penalty)
         if env_streaming:
             print()
         else:
